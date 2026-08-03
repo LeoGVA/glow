@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GLOW SURVIVAL - FINAL CONTROL</title>
+    <title>GLOW SURVIVAL - SOUND & SAVE</title>
     <style>
         body { 
             margin: 0; background: #000; color: #fff; font-family: sans-serif; 
@@ -11,25 +11,21 @@
             display: flex; align-items: center; justify-content: center; height: 100vh;
         }
         #ui-layer { position: absolute; z-index: 100; width: 100%; height: 100%; pointer-events: none; display: flex; align-items: center; justify-content: center; }
-        
         .menu-box { 
-            position: relative; background: rgba(0,0,0,0.9); padding: 30px; border: 2px solid #fff; 
+            position: relative; background: rgba(0,0,0,0.9); padding: 35px; border: 2px solid #fff; 
             border-radius: 15px; pointer-events: auto; text-align: center; min-width: 280px;
         }
         .settings-top { position: absolute; top: 10px; padding: 15px; min-width: 300px; }
-
         h1 { font-size: 32px; letter-spacing: 5px; margin: 0 0 10px; text-shadow: 0 0 15px #fff; }
         .btn { background: transparent; border: 1px solid #fff; color: #fff; padding: 12px; margin: 5px; cursor: pointer; width: 220px; font-weight: bold; }
         .btn:hover { background: #fff; color: #000; }
         .settings-btn { position: absolute; right: 10px; bottom: 10px; width: auto; padding: 4px 8px; font-size: 10px; border-color: #555; color: #888; }
-
         .ctrl-btn { 
             position: absolute; background: #222; border: 3px solid #555; border-radius: 50%; 
             pointer-events: auto; opacity: 0.1; z-index: 50; display: flex; 
             align-items: center; justify-content: center; font-weight: bold; color: #888; user-select: none;
         }
         .setting-active { opacity: 0.8 !important; border-color: #0ff !important; color: #fff; cursor: move; }
-
         #scoreBoard { position: absolute; top: 20px; width: 100%; text-align: center; z-index: 110; pointer-events: none; display: none; }
         #scoreNum { font-size: 32px; font-weight: bold; }
         canvas { background: #000; display: block; }
@@ -37,31 +33,27 @@
 </head>
 <body>
 
-<div id="scoreBoard">
-    <div id="scoreNum">0</div>
-</div>
+<div id="scoreBoard"><div id="scoreNum">0</div></div>
 
 <div id="ui-layer">
     <div id="titleScreen" class="menu-box">
         <h1>GLOW<br>SURVIVAL</h1>
-        <div id="bestText" style="color: #fb0; font-size: 14px; margin-bottom: 20px;">BEST: 0</div>
+        <div id="bestText" style="color: #fb0; font-size: 16px; margin-bottom: 20px; font-weight: bold;">BEST: 0</div>
         <button class="btn" onclick="G.start(13)">START: SMALL</button><br>
         <button class="btn" onclick="G.start(19)">START: MEDIUM</button><br>
         <button class="btn" onclick="G.start(25)">START: LARGE</button>
         <button class="btn settings-btn" onclick="G.openSettings()">SETTINGS</button>
     </div>
-
     <div id="settingsScreen" class="menu-box settings-top" style="display:none;">
         <h3 style="margin: 0;">CONTROLS</h3>
-        <p style="font-size: 10px; color: #888; margin: 5px 0;">ドラッグしてボタン移動 / スライダーでサイズ</p>
+        <p style="font-size: 10px; color: #888;">ドラッグで移動 / スライダーでサイズ</p>
         <input type="range" min="40" max="150" id="sizeRange" style="width:200px; margin: 10px 0;" oninput="G.updateBtnSize(this.value)">
         <br>
         <button class="btn" style="width: 140px; padding: 8px; font-size: 12px;" onclick="G.saveSettings()">SAVE & EXIT</button>
     </div>
-
     <div id="overScreen" class="menu-box" style="display:none;">
         <h1 style="color:#f00;">DESTROYED</h1>
-        <p id="resultScore" style="font-size: 24px; margin: 15px 0;"></p>
+        <p id="resultScore" style="font-size: 24px; margin: 10px 0;"></p>
         <button class="btn" onclick="G.showTitle()">TITLE</button>
     </div>
 </div>
@@ -74,12 +66,34 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
+// --- サウンドエンジン ---
+const Sound = {
+    ctx: new (window.AudioContext || window.webkitAudioContext)(),
+    play(freq, type, duration, vol=0.1) {
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime + duration);
+    },
+    move() { this.play(440, 'sine', 0.1, 0.05); },
+    warn() { this.play(880, 'sine', 0.1, 0.05); },
+    fire() { this.play(150, 'sawtooth', 0.3, 0.15); },
+    item() { this.play(660, 'square', 0.2, 0.05); this.play(880, 'square', 0.3, 0.05); },
+    fever() { [440, 554, 659, 880].forEach((f,i) => setTimeout(()=>this.play(f, 'sine', 0.4, 0.1), i*100)); },
+    dead() { this.play(100, 'sawtooth', 1.0, 0.2); }
+};
+
 const G = {
-    state: "title", score: 0, highScore: localStorage.getItem("gs_final_snappy_v3") || 0,
+    state: "title", score: 0, 
+    highScore: 0,
     shake: 0, difficulty: 0, lasers: [], missions: [], popups: [], particles: [],
-    spawnT: 0, fever: 0, slow: 0, peace: 0, 
-    angle: 0, targetAngle: 0, rotT: 0,
-    config: JSON.parse(localStorage.getItem("gs_final_cfg_v3")) || {
+    spawnT: 0, fever: 0, slow: 0, peace: 0, angle: 0, targetAngle: 0, rotT: 0,
+    config: JSON.parse(localStorage.getItem("gs_elite_config_v5")) || {
         size: 70, pos: {
             up: {x: 100, y: window.innerHeight - 240}, down: {x: 100, y: window.innerHeight - 100},
             left: {x: 20, y: window.innerHeight - 170}, right: {x: 180, y: window.innerHeight - 170}
@@ -89,6 +103,10 @@ const G = {
 
     init() {
         this.cvs = document.getElementById("gameCanvas"); this.ctx = this.cvs.getContext("2d");
+        // ハイスコア読み込み
+        const savedBest = localStorage.getItem("GS_ELITE_BEST_RECORD");
+        this.highScore = savedBest ? parseInt(savedBest) : 0;
+        
         this.applyConfig(); this.setupControls(); this.showTitle(); this.tick();
     },
     applyConfig() {
@@ -102,20 +120,22 @@ const G = {
     },
     updateBtnSize(v) { this.config.size = parseInt(v); this.applyConfig(); },
     setupControls() {
-        let dragTarget = null;
+        let dragTarget = null, offX = 0, offY = 0;
         const onStart = (e) => {
-            const target = e.target.closest('.ctrl-btn');
-            if (!target) return;
-            if (this.state === "settings") dragTarget = target;
-            else if (this.state === "playing") this.moveDir = target.getAttribute("data-dir");
-            if (e.cancelable) e.preventDefault();
+            if (this.state === "settings") {
+                dragTarget = e.target; const touch = e.touches ? e.touches[0] : e;
+                const r = e.target.getBoundingClientRect();
+                offX = touch.clientX - r.left; offY = touch.clientY - r.top;
+                e.preventDefault();
+            } else if (this.state === "playing") {
+                this.moveDir = e.target.getAttribute("data-dir");
+            }
         };
         const onMove = (e) => {
-            if (dragTarget) {
-                const t = e.touches ? e.touches[0] : e;
-                dragTarget.style.left = (t.clientX - this.config.size/2) + "px";
-                dragTarget.style.top = (t.clientY - this.config.size/2) + "px";
-                if (e.cancelable) e.preventDefault();
+            if (dragTarget && this.state === "settings") {
+                const touch = e.touches ? e.touches[0] : e;
+                dragTarget.style.left = (touch.clientX - offX) + "px"; dragTarget.style.top = (touch.clientY - offY) + "px";
+                e.preventDefault();
             }
         };
         const onEnd = () => {
@@ -126,15 +146,11 @@ const G = {
             }
             this.moveDir = null; this.moveCool = 0;
         };
-        
         document.querySelectorAll('.ctrl-btn').forEach(b => {
-            b.addEventListener("mousedown", onStart);
-            b.addEventListener("touchstart", onStart, {passive:false});
+            b.addEventListener("mousedown", onStart); b.addEventListener("touchstart", onStart, {passive:false});
         });
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("touchmove", onMove, {passive:false});
-        window.addEventListener("mouseup", onEnd);
-        window.addEventListener("touchend", onEnd);
+        window.addEventListener("mousemove", onMove); window.addEventListener("touchmove", onMove, {passive:false});
+        window.addEventListener("mouseup", onEnd); window.addEventListener("touchend", onEnd);
         
         window.addEventListener("keydown", e => {
             if (this.state !== "playing") return;
@@ -144,18 +160,14 @@ const G = {
             if (k === "a" || k === "arrowleft") this.moveDir = "left";
             if (k === "d" || k === "arrowright") this.moveDir = "right";
         });
-        window.addEventListener("keyup", e => {
-            const k = e.key.toLowerCase();
-            const dirs = { w:"up", arrowup:"up", s:"down", arrowdown:"down", a:"left", arrowleft:"left", d:"right", arrowright:"right" };
-            if (dirs[k] === this.moveDir) { this.moveDir = null; this.moveCool = 0; }
-        });
+        window.addEventListener("keyup", e => { this.moveDir = null; this.moveCool = 0; });
     },
     openSettings() {
         this.state = "settings"; document.getElementById("titleScreen").style.display = "none";
         document.getElementById("settingsScreen").style.display = "block";
         document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.add('setting-active'));
     },
-    saveSettings() { localStorage.setItem("gs_final_cfg_v3", JSON.stringify(this.config)); this.showTitle(); },
+    saveSettings() { localStorage.setItem("gs_elite_config_v5", JSON.stringify(this.config)); this.showTitle(); },
     showTitle() {
         this.state = "title"; document.getElementById("titleScreen").style.display = "block";
         document.getElementById("settingsScreen").style.display = "none"; document.getElementById("overScreen").style.display = "none";
@@ -165,6 +177,7 @@ const G = {
         this.angle = this.targetAngle = 0; this.resize(19);
     },
     start(size) {
+        Sound.ctx.resume(); // 音声開始
         this.resize(size); this.state = "playing"; this.score = 0; this.difficulty = 0; this.lasers = []; this.missions = []; this.popups = []; this.particles = [];
         this.fever = 0; this.slow = 0; this.peace = 0; this.angle = this.targetAngle = 0; this.rotT = 0;
         document.getElementById("titleScreen").style.display = "none"; document.getElementById("scoreBoard").style.display = "block";
@@ -190,27 +203,29 @@ const G = {
     addParticles(x, y, c, n) { for(let i=0; i<n; i++) this.particles.push({ x, y, c, vx:(Math.random()-0.5)*10, vy:(Math.random()-0.5)*10, l:30 }); },
     spawnLaser() {
         if (this.peace > 0) return;
-        const activePathsV = this.lasers.filter(l => l.v).map(l => l.p);
-        const activePathsH = this.lasers.filter(l => !l.v).map(l => l.p);
+        const activeV = this.lasers.filter(l => l.v).map(l => l.p);
+        const activeH = this.lasers.filter(l => !l.v).map(l => l.p);
         const isV = Math.random() > 0.5;
-        const targetPaths = (isV ? this.paths.filter(p => !activePathsV.includes(p)) : this.paths.filter(p => !activePathsH.includes(p)));
+        const targetPaths = (isV ? this.paths.filter(p => !activeV.includes(p)) : this.paths.filter(p => !activeH.includes(p)));
         if (targetPaths.length === 0) return;
         const p = targetPaths[Math.floor(Math.random() * targetPaths.length)];
         const r = Math.random(); const baseW = (this.slow > 0) ? 80 : 40;
+        
+        Sound.warn(); // 警告音
+
         if (this.score >= 10000 && r < 0.2) { 
             this.lasers.push({ c: "#FFF", v: isV, p, t: 0, w: 90 }, { c: "#FFF", v: !isV, p: this.paths[0], t: 0, w: 90 });
         } else if (this.score >= 7000 && r < 0.5) { 
             const idx = this.paths.indexOf(p); const n = idx < this.paths.length - 1 ? this.paths[idx + 1] : this.paths[idx - 1];
             this.lasers.push({ c: "#F0F", v: isV, p, t: 0, w: 65 }, { c: "#F0F", v: isV, p: n, t: 0, w: 65 });
-        } else { 
-            this.lasers.push({ c: "#F00", v: isV, p, t: 0, w: baseW });
-        }
+        } else { this.lasers.push({ c: "#F00", v: isV, p, t: 0, w: 40 }); }
     },
     move(dx, dy) {
         if (this.state !== "playing") return;
         const nx = this.player.gx + dx, ny = this.player.gy + dy;
         if (nx >= 2 && nx <= this.cols - 3 && ny >= 2 && ny <= this.rows - 3 && !(nx % 2 === 0 && ny % 2 === 0)) {
             this.player.gx = nx; this.player.gy = ny;
+            Sound.move();
         }
     },
     update() {
@@ -222,22 +237,19 @@ const G = {
                 this.rotT++; if (this.rotT > 550) { this.targetAngle += (Math.random()>0.5?1:-1)*Math.PI/2; this.rotT = 0; this.shake = 10; }
             }
             this.angle += (this.targetAngle - this.angle) * 0.05;
-
             if (this.moveDir && this.moveCool <= 0) {
                 const d = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] }[this.moveDir];
-                this.move(d[0], d[1]); 
-                this.moveCool = 9; // フィーバー中も速度を変えないように修正
+                this.move(d[0], d[1]); this.moveCool = 9;
             }
             if (this.moveCool > 0) this.moveCool--;
-
             this.missions.forEach((m, i) => {
                 if (this.player.gx === m.x && this.player.gy === m.y) {
                     const px = m.x * this.tileSize, py = m.y * this.tileSize;
                     this.missions.splice(i, 1); this.addParticles(px, py, m.c, 15); this.shake = 10;
-                    if (m.t === "green") { this.score += 200; this.addPopup("+200", px, py); this.spawnItem("yellow"); }
-                    else if (m.t === "yellow") { this.score += 1000; this.addPopup("+1000", px, py); this.fever = 150; this.lasers = []; this.spawnNewMissionSet(); this.shake = 25; }
-                    else if (m.t === "blue") { this.score += 300; this.addPopup("+300", px, py); if (!this.missions.some(mi => mi.t === "blue")) { this.peace = 200; this.score += 1000; this.addPopup("+1000", px, py); this.spawnNewMissionSet(); } }
-                    else if (m.t === "purple") { this.score += 500; this.addPopup("+500", px, py); this.slow = 240; this.spawnNewMissionSet(); }
+                    if (m.t === "green") { this.score += 200; this.addPopup("+200", px, py); this.spawnItem("yellow"); Sound.item(); }
+                    else if (m.t === "yellow") { this.score += 1000; this.addPopup("FEVER", px, py); this.fever = 150; this.lasers = []; this.spawnNewMissionSet(); this.shake = 25; Sound.fever(); }
+                    else if (m.t === "blue") { this.score += 300; this.addPopup("+300", px, py); Sound.item(); if (!this.missions.some(mi => mi.t === "blue")) { this.peace = 200; this.score += 1000; this.addPopup("PEACE", px, py); this.spawnNewMissionSet(); Sound.fever(); } }
+                    else if (m.t === "purple") { this.score += 500; this.addPopup("SLOW", px, py); this.slow = 240; this.spawnNewMissionSet(); Sound.item(); }
                 }
             });
             this.player.rx += (this.player.gx - this.player.rx) * 0.25; this.player.ry += (this.player.gy - this.player.ry) * 0.25;
@@ -245,11 +257,10 @@ const G = {
         }
         this.lasers.forEach((l, i) => {
             const oldT = l.t; l.t++;
-            if (oldT <= l.w && l.t > l.w) this.shake = 12;
+            if (oldT === l.w) { this.shake = 12; Sound.fire(); }
             if (this.state === "playing" && l.t > l.w && this.fever <= 0) {
                 if ((l.v && this.player.gx === l.p) || (!l.v && this.player.gy === l.p)) {
-                    this.state = "gameover"; this.shake = 35; if (this.score > this.highScore) { this.highScore = this.score; localStorage.setItem("gs_final_elite", this.highScore); }
-                    document.getElementById("overScreen").style.display = "block"; document.getElementById("resultScore").innerText = "SCORE: " + Math.floor(this.score);
+                    this.endGame();
                 }
             }
             if (l.t > l.w + 12) this.lasers.splice(i, 1);
@@ -258,6 +269,15 @@ const G = {
         this.particles.forEach((p, i) => { p.x += p.vx; p.y += p.vy; p.l--; if (p.l <= 0) this.particles.splice(i, 1); });
         this.shake *= 0.9;
         if (this.state === "playing") document.getElementById("scoreNum").innerText = Math.floor(this.score);
+    },
+    endGame() {
+        this.state = "gameover"; this.shake = 35; Sound.dead();
+        if (this.score > this.highScore) { 
+            this.highScore = this.score; 
+            localStorage.setItem("GS_ELITE_BEST_RECORD", Math.floor(this.highScore)); 
+        }
+        document.getElementById("overScreen").style.display = "block";
+        document.getElementById("resultScore").innerText = "SCORE: " + Math.floor(this.score);
     },
     draw() {
         const ctx = this.ctx; ctx.save();
@@ -270,27 +290,21 @@ const G = {
                 if (!(c % 2 === 0 && r % 2 === 0)) { ctx.fillStyle = "#111"; ctx.fillRect(c * this.tileSize + 1, r * this.tileSize + 1, this.tileSize - 2, this.tileSize - 2); }
             }
         }
-        this.missions.forEach(m => { ctx.fillStyle = m.c; ctx.shadowBlur = 10; ctx.shadowColor = m.c; ctx.fillRect(m.x * this.tileSize + 6, m.y * this.tileSize + 6, this.tileSize - 12, this.tileSize - 12); ctx.shadowBlur = 0; });
+        this.missions.forEach(m => { ctx.fillStyle = m.c; ctx.fillRect(m.x * this.tileSize + 6, m.y * this.tileSize + 6, this.tileSize - 12, this.tileSize - 12); });
         this.lasers.forEach(l => {
             if (l.t <= l.w) {
                 const a = (Math.sin(l.t*0.2)+1)/2; ctx.strokeStyle = l.c; ctx.lineWidth = 4; ctx.globalAlpha = a; ctx.beginPath();
                 if (l.v) { ctx.moveTo(l.p*this.tileSize+5, this.tileSize*2); ctx.lineTo((l.p+1)*this.tileSize-5, this.tileSize*2); ctx.moveTo(l.p*this.tileSize+5, (this.rows-2)*this.tileSize); ctx.lineTo((l.p+1)*this.tileSize-5, (this.rows-2)*this.tileSize); }
                 else { ctx.moveTo(this.tileSize*2, l.p*this.tileSize+5); ctx.lineTo(this.tileSize*2, (l.p+1)*this.tileSize-5); ctx.moveTo((this.cols-2)*this.tileSize, l.p*this.tileSize+5); ctx.lineTo((this.cols-2)*this.tileSize, (l.p+1)*this.tileSize-5); }
                 ctx.stroke(); ctx.globalAlpha = 1;
-            } else {
-                ctx.fillStyle = l.c; ctx.shadowBlur = 15; ctx.shadowColor = l.c;
-                if (l.v) ctx.fillRect(l.p * this.tileSize + 6, 0, this.tileSize - 12, this.rows * this.tileSize);
-                else ctx.fillRect(0, l.p * this.tileSize + 6, this.cols * this.tileSize, this.tileSize - 12);
-                ctx.shadowBlur = 0;
-            }
+            } else { ctx.fillStyle = l.c; ctx.shadowBlur = 15; ctx.shadowColor = l.c; if (l.v) ctx.fillRect(l.p * this.tileSize + 6, 0, this.tileSize - 12, this.rows * this.tileSize); else ctx.fillRect(0, l.p * this.tileSize + 6, this.cols * this.tileSize, this.tileSize - 12); ctx.shadowBlur = 0; }
         });
         if (this.state === "playing") {
             ctx.fillStyle = this.fever > 0 ? "#0FF" : "#FFF"; ctx.shadowBlur = 20; ctx.shadowColor = ctx.fillStyle;
             const s = this.tileSize * 0.75, px = this.player.rx * this.tileSize + (this.tileSize - s) / 2, py = this.player.ry * this.tileSize + (this.tileSize - s) / 2;
             ctx.beginPath(); ctx.moveTo(px+3, py); ctx.lineTo(px+s-3, py); ctx.arcTo(px+s, py, px+s, py+3, 3); ctx.lineTo(px+s, py+s-3); ctx.arcTo(px+s, py+s, px+s-3, py+s, 3); ctx.lineTo(px+3, py+s); ctx.arcTo(px, py+s, px, py+s-3, 3); ctx.lineTo(px, py+3); ctx.arcTo(px, py, px+3, py, 3); ctx.fill();
         }
-        this.particles.forEach(p => { ctx.fillStyle = p.c; ctx.globalAlpha = p.l/30; ctx.fillRect(p.x, p.y, 4, 4); });
-        this.popups.forEach(p => { ctx.fillStyle = "#fff"; ctx.globalAlpha = p.l/40; ctx.font = "bold 16px sans-serif"; ctx.fillText(p.v, p.x, p.y); });
+        this.popups.forEach(p => { ctx.fillStyle = "#fff"; ctx.font = "bold 16px sans-serif"; ctx.fillText(p.v, p.x, p.y); });
         ctx.restore();
     },
     tick() { this.update(); this.draw(); requestAnimationFrame(() => this.tick()); }
